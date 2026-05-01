@@ -19,6 +19,10 @@ Core workflow:
   Download script with quality preset support.
 - scripts/yt_transcribe.py
   Transcription script (local audio input only).
+- scripts/yt_caption_extract.py
+  YouTube caption extraction script with speaker detection and timestamping.
+- scripts/run_batch.ps1
+  PowerShell batch runner for multiple downloads with quality/format overrides.
 - requirements.txt
   Python dependencies.
 - pyproject.toml
@@ -108,6 +112,46 @@ python scripts/yt_transcribe.py --audio-file C:\Users\dhana\media-files\sample.m
 
 Verbose logs:
 python scripts/yt_transcribe.py --audio-file C:\Users\dhana\media-files\sample.m4a --verbose
+
+## Caption Extraction Usage Examples (YouTube Captions)
+
+Download and extract captions as timestamped transcript from YouTube (alternative to transcription).
+
+Run with config settings:
+python scripts/yt_caption_extract.py --config config/media-config.properties
+
+Extract specific video ID:
+python scripts/yt_caption_extract.py dQw4w9WgXcQ
+
+Extract with clipped time range:
+python scripts/yt_caption_extract.py dQw4w9WgXcQ --start 00:05:00 --end 00:20:00
+
+Extract with specific language:
+python scripts/yt_caption_extract.py dQw4w9WgXcQ --lang hi
+
+Extract multiple languages:
+python scripts/yt_caption_extract.py dQw4w9WgXcQ --lang te,en
+
+Extract entire playlist:
+python scripts/yt_caption_extract.py --playlist-id PLT6lIcOhPFQoNxf1If3b7ExFzoHiOjkbG
+
+Custom output path (single video only):
+python scripts/yt_caption_extract.py dQw4w9WgXcQ --output my_captions.txt
+
+Disable rolling-window deduplication:
+python scripts/yt_caption_extract.py dQw4w9WgXcQ --no-dedup
+
+Keep temporary caption files for inspection:
+python scripts/yt_caption_extract.py dQw4w9WgXcQ --keep-tmp
+
+Notes:
+- Captions are downloaded using yt-dlp (same as audio download).
+- Attempts manual captions first, falls back to auto-generated.
+- Converts to SRT format and parses to timestamped lines.
+- Detects speaker labels from caption text patterns (>>, [], "Name:").
+- Falls back to config speaker value if no speaker detected.
+- Rolling-window deduplication removes duplicate cues from YouTube auto-captions.
+- Output format matches transcripts: [HH:MM:SS.mmm -> HH:MM:SS.mmm] Speaker: text
 
 ## Batch Processing Multiple Video IDs
 

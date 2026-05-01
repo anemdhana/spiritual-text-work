@@ -14,6 +14,7 @@ dependencies = [
 [project.scripts]
 yt-transcribe = "scripts.yt_transcribe:main"
 yt-download-audio = "scripts.yt_download_audio:main"
+yt-caption-extract = "scripts.yt_caption_extract:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
