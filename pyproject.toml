@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "spiritual-text-work"
+version = "0.1.0"
+description = "Download spiritual YouTube talks and transcribe with speaker-aware timestamps"
+requires-python = ">=3.11"
+dependencies = [
+    "faster-whisper>=1.0.0",
+]
+
+[project.scripts]
+yt-transcribe = "scripts.yt_transcribe:main"
+yt-download-audio = "scripts.yt_download_audio:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["scripts*"]
