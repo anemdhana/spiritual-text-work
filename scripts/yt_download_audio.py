@@ -90,17 +90,27 @@ def resolve_tool(tools_dir: Path, name: str) -> str:
     return name
 
 
+def resolve_ytdlp(tools_dir: Path) -> list[str]:
+    """Return command prefix for yt-dlp; prefers pip module to avoid PyInstaller issues."""
+    try:
+        import yt_dlp  # noqa: F401
+        return [sys.executable, "-m", "yt_dlp"]
+    except ImportError:
+        pass
+    return [resolve_tool(tools_dir, "yt-dlp")]
+
+
 def slugify(title: str, max_len: int = 120) -> str:
     slug = _UNSAFE_CHARS.sub("-", title)
     slug = _MULTI_DASH.sub("-", slug).strip("- ")
     return slug[:max_len]
 
 
-def fetch_video_title(video_id: str, ytdlp: str, logger: logging.Logger) -> str:
+def fetch_video_title(video_id: str, ytdlp: list[str], logger: logging.Logger) -> str:
     url = f"https://www.youtube.com/watch?v={video_id}"
     try:
         result = subprocess.run(
-            [ytdlp, "--print", "title", "--no-playlist", url],
+            [*ytdlp, "--print", "title", "--no-playlist", url],
             capture_output=True,
             text=True,
             timeout=30,
@@ -115,10 +125,10 @@ def fetch_video_title(video_id: str, ytdlp: str, logger: logging.Logger) -> str:
     return ""
 
 
-def download_raw_audio(video_id: str, tmp_dir: Path, ytdlp: str, logger: logging.Logger) -> Path | None:
+def download_raw_audio(video_id: str, tmp_dir: Path, ytdlp: list[str], logger: logging.Logger) -> Path | None:
     url = f"https://www.youtube.com/watch?v={video_id}"
     out_template = str(tmp_dir / "%(id)s.%(ext)s")
-    cmd = [ytdlp, "--no-playlist", "-f", "bestaudio", "-o", out_template, url]
+    cmd = [*ytdlp, "--no-playlist", "-f", "bestaudio", "-o", out_template, url]
 
     logger.info("[1/2] Downloading raw audio …")
     logger.debug("  cmd: %s", " ".join(cmd))
@@ -249,7 +259,7 @@ def main() -> int:
     media_dir = Path(prop("media_dir", str(Path.home() / "media-files"))).expanduser()
     media_dir.mkdir(parents=True, exist_ok=True)
 
-    ytdlp = resolve_tool(tools_dir, "yt-dlp")
+    ytdlp = resolve_ytdlp(tools_dir)
     ffmpeg = resolve_tool(tools_dir, "ffmpeg")
     ffprobe = resolve_tool(tools_dir, "ffprobe")
 

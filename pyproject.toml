@@ -8,13 +8,18 @@ version = "0.1.0"
 description = "Download spiritual YouTube talks and transcribe with speaker-aware timestamps"
 requires-python = ">=3.11"
 dependencies = [
+    "azure-cognitiveservices-speech>=1.42.0",
     "faster-whisper>=1.0.0",
+    "requests>=2.31.0",
 ]
 
 [project.scripts]
+azure-transcribe = "scripts.azure_transcribe:main"
 yt-transcribe = "scripts.yt_transcribe:main"
 yt-download-audio = "scripts.yt_download_audio:main"
 yt-caption-extract = "scripts.yt_caption_extract:main"
+translate-markdown = "scripts.translate_markdown:main"
+vlc-playlist-to-m4a = "scripts.vlc_playlist_to_m4a:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

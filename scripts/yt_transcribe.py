@@ -205,8 +205,25 @@ def transcribe(
     )
 
     results = []
+    duration = getattr(info, "duration", None)
+    logger.info("  Collecting segments …")
     for seg in segments_iter:
         results.append({"start": seg.start, "end": seg.end, "text": seg.text.strip()})
+        if len(results) == 1 or len(results) % 25 == 0:
+            if duration and duration > 0:
+                pct = min((seg.end / duration) * 100.0, 100.0)
+                logger.info(
+                    "  Progress: %d segments, audio up to %s (%.1f%%)",
+                    len(results),
+                    format_ts(seg.end),
+                    pct,
+                )
+            else:
+                logger.info(
+                    "  Progress: %d segments, audio up to %s",
+                    len(results),
+                    format_ts(seg.end),
+                )
 
     logger.info("  Detected language: %s", getattr(info, "language", lang))
     logger.info("  Segments:          %d", len(results))
@@ -227,13 +244,17 @@ def write_transcript(
     """Write [HH:MM:SS.mmm -> HH:MM:SS.mmm] Speaker: text lines."""
     lines: list[str] = []
     current_speaker = default_speaker
+    total = len(segments)
+    logger.info("  Writing transcript lines …")
 
-    for seg in segments:
+    for idx, seg in enumerate(segments, start=1):
         speaker, text = detect_speaker(seg["text"], current_speaker)
         current_speaker = speaker
         ts_start = format_ts(seg["start"] + start_offset)
         ts_end   = format_ts(seg["end"]   + start_offset)
         lines.append(f"[{ts_start} -> {ts_end}] {speaker}: {text}")
+        if idx == 1 or idx % 100 == 0 or idx == total:
+            logger.info("  Write progress: %d/%d lines", idx, total)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines), encoding="utf-8")
