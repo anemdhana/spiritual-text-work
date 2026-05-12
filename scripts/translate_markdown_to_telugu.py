@@ -21,7 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--config",
-        default="config/media-config.properties",
+        default="../config/media-config.properties",
         help="Path to properties file (default: config/media-config.properties)",
     )
     parser.add_argument(

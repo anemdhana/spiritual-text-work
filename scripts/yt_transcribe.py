@@ -35,6 +35,29 @@ from pathlib import Path
 _DEFAULT_CONFIG = Path(__file__).parent.parent / "config" / "media-config.properties"
 
 
+_NON_SPEECH_MARKERS = {
+    "[music]",
+    "[applause]",
+    "[laughter]",
+    "(music)",
+    "(applause)",
+    "(laughter)",
+}
+
+_SPIRITUAL_TERM_NORMALIZATION = {
+    "pranayam": "pranayama",
+    "pranaayam": "pranayama",
+    "krya": "kriya",
+    "kundalni": "kundalini",
+    "manthra": "mantra",
+    "atman": "atman",
+    "brahman": "brahman",
+    "bhakthi": "bhakti",
+    "dhyaan": "dhyana",
+    "moksh": "moksha",
+}
+
+
 # ---------------------------------------------------------------------------
 # Properties helpers
 # ---------------------------------------------------------------------------
@@ -67,6 +90,19 @@ def resolve_placeholders(value: str, props: dict[str, str]) -> str:
 
 def resolve_all(props: dict[str, str]) -> dict[str, str]:
     return {k: resolve_placeholders(v, props) for k, v in props.items()}
+
+
+def parse_bool(value: str, default: bool = False) -> bool:
+    cleaned = (value or "").strip().lower()
+    if cleaned in {"1", "true", "yes", "y", "on"}:
+        return True
+    if cleaned in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
+
+
+def parse_csv(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +212,10 @@ def transcribe(
     audio_path: Path,
     lang: str,
     model_size: str,
+    beam_size: int,
+    best_of: int,
+    initial_prompt: str,
+    hotwords: str,
     logger: logging.Logger,
 ) -> list[dict] | None:
     """Transcribe with faster-whisper medium model; returns list of segment dicts."""
@@ -196,13 +236,26 @@ def transcribe(
     model = WhisperModel(model_size, device="cpu", compute_type="int8")
     logger.info("  Transcribing: %s", audio_path.name)
 
-    segments_iter, info = model.transcribe(
-        str(audio_path),
-        language=primary_lang,
-        beam_size=5,
-        vad_filter=True,
-        word_timestamps=True,
-    )
+    kwargs = {
+        "language": primary_lang,
+        "beam_size": beam_size,
+        "best_of": best_of,
+        "vad_filter": True,
+        "word_timestamps": True,
+        "condition_on_previous_text": True,
+        "temperature": 0.0,
+    }
+    if initial_prompt:
+        kwargs["initial_prompt"] = initial_prompt
+    if hotwords:
+        kwargs["hotwords"] = hotwords
+
+    try:
+        segments_iter, info = model.transcribe(str(audio_path), **kwargs)
+    except TypeError:
+        # Some faster-whisper versions do not support hotwords.
+        kwargs.pop("hotwords", None)
+        segments_iter, info = model.transcribe(str(audio_path), **kwargs)
 
     results = []
     duration = getattr(info, "duration", None)
@@ -239,6 +292,7 @@ def write_transcript(
     output_path: Path,
     default_speaker: str,
     start_offset: float,
+    cleanup_text: bool,
     logger: logging.Logger,
 ) -> None:
     """Write [HH:MM:SS.mmm -> HH:MM:SS.mmm] Speaker: text lines."""
@@ -249,6 +303,10 @@ def write_transcript(
 
     for idx, seg in enumerate(segments, start=1):
         speaker, text = detect_speaker(seg["text"], current_speaker)
+        if cleanup_text:
+            text = clean_transcript_text(text)
+            if not text:
+                continue
         current_speaker = speaker
         ts_start = format_ts(seg["start"] + start_offset)
         ts_end   = format_ts(seg["end"]   + start_offset)
@@ -259,6 +317,27 @@ def write_transcript(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines), encoding="utf-8")
     logger.info("  Transcript: %s  (%d lines)", output_path, len(lines))
+
+
+def clean_transcript_text(text: str) -> str:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return ""
+
+    lower = cleaned.lower()
+    if lower in _NON_SPEECH_MARKERS:
+        return ""
+
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    cleaned = re.sub(r"\s+([,.;:!?])", r"\1", cleaned)
+
+    for bad, good in _SPIRITUAL_TERM_NORMALIZATION.items():
+        cleaned = re.sub(rf"\b{re.escape(bad)}\b", good, cleaned, flags=re.IGNORECASE)
+
+    cleaned = cleaned.strip()
+    if cleaned and cleaned[-1].isalnum():
+        cleaned += "."
+    return cleaned
 
 
 # ---------------------------------------------------------------------------
@@ -280,6 +359,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--model",      default="",  help="Whisper model size (default: medium)")
     p.add_argument("--speaker",    default="",  help="Default speaker label")
     p.add_argument("--audio-file", dest="audio_file", default="", help="Local audio file path")
+    p.add_argument("--hotwords",   default="",  help="Comma-separated custom bias words for transcription")
+    p.add_argument("--initial-prompt", default="", help="Initial domain prompt for transcription")
     p.add_argument("--verbose",    action="store_true", help="Enable DEBUG logging")
     return p
 
@@ -340,13 +421,35 @@ def main() -> int:
     speaker    = prop("speaker",   args.speaker, "Speaker 1")
     codec_opts = cfg.get("audio_codec", "-c:a aac -b:a 48k -ar 32000 -ac 1")
     out_suffix = cfg.get("output_suffix", ".transcript")
+    beam_size = int(cfg.get("transcribe_beam_size", "8"))
+    best_of = int(cfg.get("transcribe_best_of", "6"))
+    cleanup_text = parse_bool(cfg.get("transcribe_cleanup_text", "true"), default=True)
+
+    default_prompt = (
+        "This is a spiritual discourse. Prioritize accurate transcription of terms like "
+        "atma, dharma, karma, bhakti, jnana, yoga, pranayama, mantra, guru, moksha, "
+        "surrender, consciousness, awareness, silence, compassion, and meditation."
+    )
+    initial_prompt = prop("transcribe_initial_prompt", args.initial_prompt, default_prompt)
+
+    hotword_items = parse_csv(prop("transcribe_hotwords", args.hotwords, ""))
+    if not hotword_items:
+        hotword_items = [
+            "atma", "dharma", "karma", "bhakti", "jnana", "yoga", "pranayama",
+            "mantra", "guru", "moksha", "kundalini", "awareness", "consciousness",
+            "surrender", "silence", "grace", "meditation",
+        ]
+    hotwords = ",".join(hotword_items)
 
     logger.info("  Start    : %s", start_raw or "(none)")
     logger.info("  End      : %s", end_raw   or "(none)")
     logger.info("  Language : %s", lang)
     logger.info("  Model    : %s", model_size)
+    logger.info("  Beam size: %d", beam_size)
+    logger.info("  Best of  : %d", best_of)
     logger.info("  Speaker  : %s", speaker)
     logger.info("  Codec    : %s", codec_opts)
+    logger.info("  Cleanup  : %s", cleanup_text)
 
     start_offset = parse_ts(start_raw) if start_raw else 0.0
 
@@ -363,12 +466,28 @@ def main() -> int:
             m4a_path = audio_file_path
             logger.info("[1/2] Using local audio as-is: %s", m4a_path.name)
 
-        segments = transcribe(m4a_path, lang, model_size, logger)
+        segments = transcribe(
+            m4a_path,
+            lang,
+            model_size,
+            beam_size,
+            best_of,
+            initial_prompt,
+            hotwords,
+            logger,
+        )
         if segments is None:
             return 1
 
         transcript_path = media_dir / (m4a_path.stem + out_suffix + ".txt")
-        write_transcript(segments, transcript_path, speaker, start_offset, logger)
+        write_transcript(
+            segments,
+            transcript_path,
+            speaker,
+            start_offset,
+            cleanup_text,
+            logger,
+        )
 
     logger.info("Done.")
     return 0
